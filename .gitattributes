@@ -1,0 +1,4 @@
+# This file is fetched and piped straight into bash. Checked out with CRLF it
+# fails on the shebang - "bad interpreter: /usr/bin/env bash^M" - naming a
+# program that is plainly installed. Pin it.
+*.sh text eol=lf
