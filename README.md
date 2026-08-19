@@ -57,6 +57,11 @@ half an installer.
 
 ## Where it comes from
 
-Generated from `install/Install-Ruliax-Wiki.command` in the private
-`Ruliax-AI/RuliaxWiki` repository and published from there. Edit it there, not
-here.
+`install.sh` is generated from `install/Install-Ruliax-Wiki.command` in the
+private `Ruliax-AI/RuliaxWiki` repository, and pushed here by that repository's
+`release` command. **Edit it there, not here** - anything changed here is
+overwritten on the next release. This README is not synced, and can be edited
+freely.
+
+Note that `raw.githubusercontent.com` caches for about five minutes, so a
+freshly published change is not instantly what the one-liner serves.
