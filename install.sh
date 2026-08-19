@@ -125,6 +125,25 @@ release_asset_url() {
         | head -1
 }
 
+# ── Root ──────────────────────────────────────────────────────────────────
+
+as_root() {
+    # Not every Linux box has sudo. Containers and minimal images often run as
+    # root already, and some distributions ship doas instead.
+    if [ "$(id -u)" -eq 0 ]; then "$@"
+    elif command -v sudo >/dev/null 2>&1; then sudo "$@"
+    elif command -v doas >/dev/null 2>&1; then doas "$@"
+    else return 127
+    fi
+}
+
+can_be_root() {
+    [ "$(id -u)" -eq 0 ] && return 0
+    command -v sudo >/dev/null 2>&1 && return 0
+    command -v doas >/dev/null 2>&1 && return 0
+    return 1
+}
+
 # ── PATH ──────────────────────────────────────────────────────────────────
 
 shell_rc() {
@@ -183,12 +202,17 @@ install_git() {
         return 0
     fi
 
+    can_be_root || stop_here 'git is missing, and installing it needs administrator rights.' \
+                             'Install git with your package manager, then run this again.'
+
     say 'installing git (you may be asked for your password)'
-    if   command -v apt-get >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y git
-    elif command -v dnf     >/dev/null 2>&1; then sudo dnf install -y git
-    elif command -v yum     >/dev/null 2>&1; then sudo yum install -y git
-    elif command -v pacman  >/dev/null 2>&1; then sudo pacman -Sy --noconfirm git
-    elif command -v zypper  >/dev/null 2>&1; then sudo zypper install -y git
+    if   command -v apt-get >/dev/null 2>&1; then as_root apt-get update -qq && as_root apt-get install -y git
+    elif command -v dnf     >/dev/null 2>&1; then as_root dnf install -y git
+    elif command -v yum     >/dev/null 2>&1; then as_root yum install -y git
+    elif command -v pacman  >/dev/null 2>&1; then as_root pacman -Sy --noconfirm git
+    elif command -v zypper  >/dev/null 2>&1; then as_root zypper install -y git
+    elif command -v apk     >/dev/null 2>&1; then as_root apk add --no-cache git
+    elif command -v emerge  >/dev/null 2>&1; then as_root emerge --quiet dev-vcs/git
     else stop_here 'Could not work out how to install git on this system.' \
                    'Install git with your package manager, then run this again.'
     fi
@@ -254,7 +278,8 @@ find_obsidian() {
         done
     else
         command -v obsidian >/dev/null 2>&1 && { command -v obsidian; return 0; }
-        for p in "$BIN/obsidian" "$HOME/Applications/Obsidian.AppImage" \
+        for p in "$BIN/obsidian" "$HOME/.local/share/obsidian/obsidian" \
+                 "$HOME/Applications/Obsidian.AppImage" \
                  "/var/lib/flatpak/exports/bin/md.obsidian.Obsidian" \
                  "$HOME/.local/share/flatpak/exports/bin/md.obsidian.Obsidian"; do
             [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
@@ -291,43 +316,106 @@ install_obsidian_macos() {
 }
 
 install_obsidian_linux() {
-    if command -v apt-get >/dev/null 2>&1 && [ "$ARCH" = amd64 ]; then
+    # Debian and Ubuntu get the .deb: it is Obsidian's own build, and it wires
+    # up the menu entry, the icon and the Chromium sandbox helper for us.
+    if command -v apt-get >/dev/null 2>&1 && [ "$ARCH" = amd64 ] && can_be_root; then
         url="$(release_asset_url obsidianmd/obsidian-releases 'obsidian_[0-9.]+_amd64\.deb$')"
         if [ -n "$url" ]; then
             tmp="$(mktemp -d)"
             say 'downloading Obsidian'
             if fetch "$url" "$tmp/obsidian.deb"; then
                 say 'installing Obsidian (you may be asked for your password)'
-                sudo apt-get install -y "$tmp/obsidian.deb" && { rm -rf "$tmp"; return 0; }
+                as_root apt-get install -y "$tmp/obsidian.deb" && { rm -rf "$tmp"; return 0; }
             fi
             rm -rf "$tmp"
         fi
     fi
 
-    # AppImage: works anywhere, but needs FUSE, which plenty of distributions
-    # no longer ship. Say so rather than leaving a file that will not run.
-    if [ "$ARCH" = arm64 ]; then pat='Obsidian-[0-9.]+-arm64\.AppImage$'; else pat='Obsidian-[0-9.]+\.AppImage$'; fi
+    # Everywhere else: Obsidian's own tarball, unpacked into the home folder.
+    #
+    # Not the AppImage, which is the same binary wrapped in a format that needs
+    # FUSE 2 - and Fedora and others stopped shipping that, so it would install
+    # cleanly and then refuse to start. Not Flatpak or Snap either: both are
+    # third-party repackagings of an application that opens the cap table.
+    install_obsidian_tarball
+}
+
+# Electron needs either unprivileged user namespaces or a setuid helper. Most
+# distributions allow the former; Debian-derived ones that turned it off, and
+# Ubuntu 24.04's AppArmor rule, do not - and Obsidian then exits complaining
+# about the SUID sandbox. Checking first avoids asking for a password on the
+# majority of machines where nothing needs doing.
+userns_available() {
+    [ "$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 1)" != "0" ] || return 1
+    [ "$(cat /proc/sys/user/max_user_namespaces 2>/dev/null || echo 1)" != "0" ] || return 1
+    [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = "0" ] || return 1
+    return 0
+}
+
+install_obsidian_tarball() {
+    if [ "$ARCH" = arm64 ]; then pat='obsidian-[0-9.]+-arm64\.tar\.gz$'
+    else pat='obsidian-[0-9.]+\.tar\.gz$'
+    fi
     url="$(release_asset_url obsidianmd/obsidian-releases "$pat")"
     [ -n "$url" ] || return 1
-    say 'downloading Obsidian (AppImage)'
-    fetch "$url" "$BIN/obsidian" || return 1
-    chmod +x "$BIN/obsidian"
+
+    say 'downloading Obsidian (about 120 MB, this is the slow part)'
+    tmp="$(mktemp -d)"
+    if ! fetch "$url" "$tmp/obsidian.tar.gz"; then rm -rf "$tmp"; return 1; fi
+
+    dest="$HOME/.local/share/obsidian"
+    rm -rf "$dest"
+    mkdir -p "$dest"
+    # The tarball holds one obsidian-<version>/ directory. Strip it, so an
+    # upgrade lands in the same place and the menu entry never goes stale.
+    if ! tar -xzf "$tmp/obsidian.tar.gz" -C "$dest" --strip-components=1; then
+        rm -rf "$tmp" "$dest"
+        return 1
+    fi
+    rm -rf "$tmp"
+    [ -f "$dest/obsidian" ] || return 1
+    # The archive does record rwxr-xr-x, but a home directory on a filesystem
+    # that cannot store the bit would leave it unset - and the symptom is an
+    # install that reports success and an Obsidian that never opens.
+    chmod +x "$dest/obsidian" "$dest/obsidian-cli" 2>/dev/null || true
+
+    ln -sf "$dest/obsidian" "$BIN/obsidian"
+
+    exec_line="$BIN/obsidian %u"
+    if ! userns_available; then
+        if as_root chown root:root "$dest/chrome-sandbox" 2>/dev/null &&
+           as_root chmod 4755 "$dest/chrome-sandbox" 2>/dev/null; then
+            :
+        else
+            warn 'This kernel restricts user namespaces and the sandbox helper needs root.'
+            dim 'Obsidian will run with --no-sandbox. To undo that later:'
+            dim "  sudo chown root:root $dest/chrome-sandbox"
+            dim "  sudo chmod 4755 $dest/chrome-sandbox"
+            exec_line="$BIN/obsidian --no-sandbox %u"
+        fi
+    fi
+
+    if [ -f "$dest/resources/icon.png" ]; then
+        mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
+        cp "$dest/resources/icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/obsidian.png"
+    fi
 
     mkdir -p "$HOME/.local/share/applications"
     cat > "$HOME/.local/share/applications/obsidian.desktop" <<DESKTOP
 [Desktop Entry]
 Name=Obsidian
-Exec=$BIN/obsidian %u
+Comment=A knowledge base that works on local Markdown files
+Exec=$exec_line
 Terminal=false
 Type=Application
 Icon=obsidian
 Categories=Office;
+MimeType=x-scheme-handler/obsidian;
+StartupWMClass=obsidian
 DESKTOP
+    update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true
+    gtk-update-icon-cache -q -t "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
 
-    if ! "$BIN/obsidian" --version >/dev/null 2>&1; then
-        warn 'Obsidian is installed but may need FUSE to start.'
-        dim 'On Debian or Ubuntu:  sudo apt install libfuse2'
-    fi
     return 0
 }
 
