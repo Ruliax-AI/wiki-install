@@ -457,3 +457,5 @@ main() {
 # The last line of the file, deliberately. See the note at the top: piped into
 # bash, a truncated download must do nothing rather than half of something.
 main "$@"
+
+# DRIFT: edited in the public repo, which nobody should ever do
