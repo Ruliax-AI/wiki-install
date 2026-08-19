@@ -556,7 +556,7 @@ main() {
     head_ done
     good 'This computer is ready.'
     printf '\n'
-    say 'Open Obsidian and pick a vault from the list. That is the whole workflow.'
+    say 'The list just above shows where your notes are and what each vault holds.'
     printf '\n'
     dim 'Your notes save and sync by themselves. You never need to run this again -'
     dim 'except when your access changes, when running it once more catches up.'
