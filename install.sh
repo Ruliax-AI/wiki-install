@@ -504,6 +504,15 @@ main() {
         else warn 'could not update - carrying on with what is here'
         fi
     else
+        # A folder already there but not a clone. Say so, rather than letting
+        # the clone fail and blaming GitHub access - which is what it looked
+        # like, and would have sent someone to ask a founder about a permission
+        # that was never the problem. Nothing here is deleted or merged into.
+        if [ -d "$ROOT" ] && [ -n "$(ls -A "$ROOT" 2>/dev/null)" ]; then
+            stop_here "$ROOT already exists and has files in it." \
+                      'Nothing was changed. Rename or move that folder, then run this again.'
+        fi
+
         gh repo clone "$SLUG" "$ROOT" >/dev/null 2>&1 || true
         [ -d "$ROOT/.git" ] || stop_here "Could not download $SLUG." \
             'Most likely your GitHub account has not been added yet. Ask a founder, then run this again.'
