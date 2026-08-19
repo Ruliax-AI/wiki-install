@@ -62,16 +62,25 @@ head_() {
     printf '\n%s\n' "${C_CYAN}== $1 $(printf '=%.0s' $(seq 1 "$n"))${C_OFF}"
 }
 
-# A double-clicked window closes the instant the script ends, taking the error
-# message with it. Hold it open - but only when double-clicked. Run from a
-# terminal, the window is the person's own and pausing it is just rude.
+# A double-clicked .command gets its own window, which closes the instant the
+# script ends and takes the error message with it. Hold that one open.
+#
+# Only that one: `curl | bash` and `bash install.sh` both run in a window the
+# person already had open, where a pause is one more keypress for nothing.
+# Testing the terminal alone does not tell those apart - it is true for a
+# double-click and for a terminal run alike - so test the name we were invoked
+# under, which is "bash" for a pipe and the script's own path for a click.
 finish() {
     code=$?
     printf '\n'
-    if [ -t 0 ] && [ -t 1 ]; then
-        printf '  %s' "${C_DIM}Press return to close this window.${C_OFF}"
-        read -r _ || true
-    fi
+    case "${0:-}" in
+        *.command)
+            if [ -t 0 ] && [ -t 1 ]; then
+                printf '  %s' "${C_DIM}Press return to close this window.${C_OFF}"
+                read -r _ || true
+            fi
+            ;;
+    esac
     exit "$code"
 }
 trap finish EXIT
@@ -206,7 +215,13 @@ install_git() {
                              'Install git with your package manager, then run this again.'
 
     say 'installing git (you may be asked for your password)'
-    if   command -v apt-get >/dev/null 2>&1; then as_root apt-get update -qq && as_root apt-get install -y git
+    if command -v apt-get >/dev/null 2>&1; then
+        # A failing `update` must not stop the install. One stale third-party
+        # repository - a PPA for something uninstalled a year ago - is enough
+        # to make it exit non-zero on a machine where git would have installed
+        # perfectly well from the existing package lists.
+        as_root apt-get update -qq || warn 'apt-get update reported a problem - carrying on anyway'
+        as_root apt-get install -y git
     elif command -v dnf     >/dev/null 2>&1; then as_root dnf install -y git
     elif command -v yum     >/dev/null 2>&1; then as_root yum install -y git
     elif command -v pacman  >/dev/null 2>&1; then as_root pacman -Sy --noconfirm git
@@ -305,8 +320,17 @@ install_obsidian_macos() {
     mkdir -p "$dest"
     cp -R "$tmp/mnt/Obsidian.app" "$dest/" 2>/dev/null
     rc=$?
-    hdiutil detach -quiet "$tmp/mnt" || true
-    rm -rf "$tmp"
+
+    # Unmount before deleting the temporary directory. rm -rf over a still
+    # mounted image descends into the image itself, which at best is slow and
+    # noisy and at worst is deleting inside somebody's disk image.
+    hdiutil detach -quiet "$tmp/mnt" 2>/dev/null ||
+        hdiutil detach -force -quiet "$tmp/mnt" 2>/dev/null || true
+    if mount 2>/dev/null | grep -q " $tmp/mnt "; then
+        warn "Could not unmount the Obsidian disk image; leaving $tmp alone."
+    else
+        rm -rf "$tmp"
+    fi
 
     # It came from the internet, so it is quarantined, and the first launch
     # would be a Gatekeeper refusal. We downloaded it deliberately from
