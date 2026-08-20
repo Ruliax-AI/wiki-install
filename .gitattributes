@@ -1,4 +1,9 @@
-# This file is fetched and piped straight into bash. Checked out with CRLF it
+# install.sh is fetched and piped straight into bash. Checked out with CRLF it
 # fails on the shebang - "bad interpreter: /usr/bin/env bash^M" - naming a
-# program that is plainly installed. Pin it.
-*.sh text eol=lf
+# program that is plainly installed.
+*.sh  text eol=lf
+
+# The Windows installer is the opposite: a .cmd with LF endings misbehaves in
+# cmd.exe. Both are downloaded directly from here, so both must be right in
+# the repository rather than right after some conversion.
+*.cmd text eol=crlf
