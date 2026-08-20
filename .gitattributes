@@ -4,6 +4,11 @@
 *.sh  text eol=lf
 
 # The Windows installer is the opposite: a .cmd with LF endings misbehaves in
-# cmd.exe. Both are downloaded directly from here, so both must be right in
-# the repository rather than right after some conversion.
-*.cmd text eol=crlf
+# cmd.exe. `text eol=crlf` is NOT enough here, and that is the whole point of
+# this comment: it converts on checkout, but raw.githubusercontent.com serves
+# the normalised blob straight out of the index, so a downloaded file is always
+# LF no matter what the attribute says.
+#
+# `-text` disables normalisation entirely. The bytes committed are the bytes
+# served, so the CRLF has to be right in the working tree at commit time.
+*.cmd -text
