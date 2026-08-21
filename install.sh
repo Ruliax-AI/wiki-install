@@ -278,6 +278,13 @@ install_gh() {
     install -m 0755 "$found" "$BIN/gh"
     rm -rf "$tmp"
 
+    # curl tags anything it downloads with com.apple.quarantine, and git runs
+    # gh as its credential helper on every push - from inside Obsidian, not
+    # from a terminal. A quarantined helper there fails silently: commits
+    # succeed locally and nothing ever reaches GitHub. We fetched this from the
+    # project's own release deliberately, so clear the flag.
+    [ "$PLATFORM" = macos ] && xattr -d com.apple.quarantine "$BIN/gh" 2>/dev/null
+
     command -v gh >/dev/null 2>&1 || stop_here 'The GitHub CLI did not install.' 'Ask a founder.'
     good "GitHub CLI installed into $BIN"
 }
